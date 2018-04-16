@@ -7,12 +7,12 @@ Parameters:
   RedisNodeType:
     Description: elasticache Redis Node Instance Type
     Type: String
-    Default: cache.m3.medium
+    Default: cache.t2.micro
     AllowedValues:
       - cache.t2.micro 
       - cache.m4.large
       - cache.m3.medium
-    ConstraintDescription: must be an m3.medium - the least costly machine that can use a Replication Group.
+    ConstraintDescription: must be an m3.medium for a Replication Group - the least costly machine that can use a Replication Group.
 
   # Subnets
   VPCSubnetCidrBlock:
@@ -40,48 +40,10 @@ Parameters:
     AllowedPattern: "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})"
   PrivateSubnetCidrBlock1:
     Type: String
-    Default: 10.0.4.0/24
+    Default: 10.0.2.0/24
     MinLength: '10'
     MaxLength: '18'
     AllowedPattern: "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})"
-
-  # Remote Access Network
-  RemoteCidrForSecurityGroup:
-    Description: CIDR Block for SG to Grant Access to Instances (i.e. 192.168.100.0/24)
-    Type: String
-    MinLength: '9'
-    MaxLength: '18'
-    Default: 192.168.100.0/24
-    AllowedPattern: "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})"
-    ConstraintDescription: must be a valid CIDR range of the form x.x.x.x/x.
-  RemoteCidrForPublicAcl:
-    Description: CIDR Block for Public ACL to Grant Access to Network (i.e. 32.159.24.111/32)
-    Type: String
-    MinLength: '9'
-    MaxLength: '18'
-    Default: 0.0.0.0/32
-    AllowedPattern: "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})"
-    ConstraintDescription: must be a valid CIDR range of the form x.x.x.x/x.
-
-  # Rule Numbers
-  AllowVpcSubnetsRuleNumber:
-    Type: Number
-    Default: '100'
-  AllowRemoteNetworkPublicRuleNumber:
-    Type: Number
-    Default: '200'
-  AllowReturnTrafficToPublicRuleNumber:
-    Type: Number
-    Default: '300'
-  AllowAllInboundPrivateRuleNumber:
-    Type: Number
-    Default: '150'
-  AllowAllOutboundPublicRuleNumber:
-    Type: Number
-    Default: '100'
-  AllowAllOutboundPrivateRuleNumber:
-    Type: Number
-    Default: '100'
 
 Resources:
   VPC:
@@ -93,6 +55,8 @@ Resources:
       Tags:
       - Key: Name
         Value: !Ref "AWS::StackName"
+
+  # Public subnet
   PublicSubnet1:
     Type: AWS::EC2::Subnet
     DependsOn: VPC
@@ -103,12 +67,14 @@ Resources:
       Tags:
       - Key: Name
         Value: !Join [ "", [ !Ref "AWS::StackName", "-public-az1" ] ]
+
   InternetGateway:
     Type: AWS::EC2::InternetGateway
     Properties:
       Tags:
       - Key: Name
         Value: !Ref "AWS::StackName"
+
   GatewayToInternet:
     Type: AWS::EC2::VPCGatewayAttachment
     DependsOn:
@@ -117,6 +83,7 @@ Resources:
     Properties:
       VpcId: !Ref VPC
       InternetGatewayId: !Ref InternetGateway
+
   PublicRouteTable:
     Type: AWS::EC2::RouteTable
     DependsOn: VPC
@@ -125,6 +92,7 @@ Resources:
       Tags:
       - Key: Name
         Value: !Join [ "", [ !Ref "AWS::StackName", "-public" ] ]
+
   PublicRoute:
     Type: AWS::EC2::Route
     DependsOn:
@@ -134,6 +102,7 @@ Resources:
       RouteTableId: !Ref PublicRouteTable
       DestinationCidrBlock: 0.0.0.0/0
       GatewayId: !Ref InternetGateway
+
   PublicSubnetRouteTableAssociation1:
     Type: AWS::EC2::SubnetRouteTableAssociation
     DependsOn:
@@ -142,33 +111,7 @@ Resources:
     Properties:
       SubnetId: !Ref PublicSubnet1
       RouteTableId: !Ref PublicRouteTable
-  PrivateSubnet1:
-    Type: AWS::EC2::Subnet
-    DependsOn: VPC
-    Properties:
-      VpcId: !Ref VPC
-      AvailabilityZone: !Join [ "", [ !Ref "AWS::Region", !Ref AvailabilityZone2 ] ]
-      CidrBlock: !Ref PrivateSubnetCidrBlock1
-      Tags:
-      - Key: Name
-        Value: !Join [ "", [ !Ref "AWS::StackName", "-private-az1" ] ]
-  PrivateRouteTable:
-    Type: AWS::EC2::RouteTable
-    DependsOn: VPC
-    Properties:
-      VpcId: !Ref VPC
-      Tags:
-      - Key: Name
-        Value: !Join [ "", [ !Ref "AWS::StackName", "-private" ] ]
-  PrivateSubnetRouteTableAssociation1:
-    Type: AWS::EC2::SubnetRouteTableAssociation
-    DependsOn:
-    - PrivateSubnet1
-    - PrivateRouteTable
-    Properties:
-      SubnetId: !Ref PrivateSubnet1
-      RouteTableId: !Ref PrivateRouteTable
-
+  
   # Public Network ACL
   PublicNetworkAcl:
     Type: AWS::EC2::NetworkAcl
@@ -180,59 +123,117 @@ Resources:
         Value: !Join [ "", [ !Ref "AWS::StackName", "-public-acl" ] ]
 
   # Public Network ACL Rules
-  InboundPublicNetworkAclAllowVPCSubnets:
+  InboundPublicNetworkAclAllowHTTP:
     Type: AWS::EC2::NetworkAclEntry
     DependsOn: PublicNetworkAcl
     Properties:
       NetworkAclId: !Ref PublicNetworkAcl
-      RuleNumber: !Ref AllowVpcSubnetsRuleNumber
-      Protocol: "-1"
-      RuleAction: allow
-      Egress: 'false'
-      CidrBlock: !Ref VPCSubnetCidrBlock
-      PortRange:
-        From: '0'
-        To: '65535'
-  InboundPublicNetworkAclAllowRemoteNetwork:
-    Type: AWS::EC2::NetworkAclEntry
-    DependsOn: PublicNetworkAcl
-    Properties:
-      NetworkAclId: !Ref PublicNetworkAcl
-      RuleNumber: !Ref AllowRemoteNetworkPublicRuleNumber
-      Protocol: "-1"
-      RuleAction: allow
-      Egress: 'false'
-      CidrBlock: !Ref RemoteCidrForPublicAcl
-      PortRange:
-        From: '0'
-        To: '65535'
-
-  InboundPublicNetworkAclAllowReturnTraffic:
-    Type: AWS::EC2::NetworkAclEntry
-    DependsOn: PublicNetworkAcl
-    Properties:
-      NetworkAclId: !Ref PublicNetworkAcl
-      RuleNumber: !Ref AllowReturnTrafficToPublicRuleNumber
+      RuleNumber: 80
       Protocol: '6'
       RuleAction: allow
       Egress: 'false'
       CidrBlock: 0.0.0.0/0
       PortRange:
-        From: '1024'
-        To: '65535'
-  OutboundPublicNetworkAclAllowAll:
+        From: '80'
+        To: '80'
+
+  InboundPublicNetworkAclAllowHTTPS:
     Type: AWS::EC2::NetworkAclEntry
     DependsOn: PublicNetworkAcl
     Properties:
       NetworkAclId: !Ref PublicNetworkAcl
-      RuleNumber: !Ref AllowAllOutboundPublicRuleNumber
-      Protocol: "-1"
+      RuleNumber: 90
+      Protocol: '6'
+      RuleAction: allow
+      Egress: 'false'
+      CidrBlock: 0.0.0.0/0
+      PortRange:
+        From: '443'
+        To: '443'
+
+  InboundPublicNetworkACLEntryForSSH:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      CidrBlock: 0.0.0.0/32
+      NetworkAclId:
+        Ref: PublicNetworkAcl
+      Egress: false
+      Protocol: 6
+      PortRange:
+        From: 22
+        To: 22
+      RuleAction: allow
+      RuleNumber: 100
+
+  InboundPublicNetworkACLEntryForEphemeralConnections:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      CidrBlock: 0.0.0.0/0
+      NetworkAclId:
+        Ref: PublicNetworkAcl
+      Egress: false
+      Protocol: 6
+      PortRange:
+        From: 1024
+        To: 65535
+      RuleAction: allow
+      RuleNumber: 200
+  
+  OutboundPublicNetworkAclAllowHTTP:
+    Type: AWS::EC2::NetworkAclEntry
+    DependsOn: PublicNetworkAcl
+    Properties:
+      NetworkAclId: !Ref PublicNetworkAcl
+      RuleNumber: 80
+      Protocol: '6'
       RuleAction: allow
       Egress: 'true'
       CidrBlock: 0.0.0.0/0
       PortRange:
-        From: '0'
-        To: '65535'
+        From: '80'
+        To: '80'
+
+  OutboundPublicNetworkAclAllowHTTPS:
+    Type: AWS::EC2::NetworkAclEntry
+    DependsOn: PublicNetworkAcl
+    Properties:
+      NetworkAclId: !Ref PublicNetworkAcl
+      RuleNumber: 90
+      Protocol: '6'
+      RuleAction: allow
+      Egress: 'true'
+      CidrBlock: 0.0.0.0/0
+      PortRange:
+        From: '443'
+        To: '443'
+
+  OutboundPublicNetworkACLEntryForSSH:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      CidrBlock: 0.0.0.0/32
+      NetworkAclId:
+        Ref: PublicNetworkAcl
+      Egress: true
+      Protocol: 6
+      PortRange:
+        From: 22
+        To: 22
+      RuleAction: allow
+      RuleNumber: 100
+
+  OutboundPublicNetworkACLEntryForEphemeralConnections:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+      CidrBlock: 0.0.0.0/0
+      NetworkAclId:
+        Ref: PublicNetworkAcl
+      Egress: true
+      Protocol: 6
+      PortRange:
+        From: 1024
+        To: 65535
+      RuleAction: allow
+      RuleNumber: 200
 
   # Public Subnet Association
   PublicSubnetNetworkAclAssociation1:
@@ -243,6 +244,120 @@ Resources:
     Properties:
       SubnetId: !Ref PublicSubnet1
       NetworkAclId: !Ref PublicNetworkAcl
+
+  # Bastion server
+  ElasticCacheRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - sts:AssumeRole
+            Principal:
+              Service: 
+                - ec2.amazonaws.com
+      Path: /
+
+  ElasticCachePolicy:
+    Type: "AWS::IAM::Policy"
+    Properties: 
+      PolicyName: "ElasticCachePolicy"
+      PolicyDocument: 
+        Version: "2012-10-17"
+        Statement: 
+          - Effect: "Allow"
+            Action: 
+              - "elasticache:*"
+            Resource: "*"
+      Roles:
+        - Ref: ElasticCacheRole
+
+  ElasticCacheInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: /
+      Roles:
+        - Ref: ElasticCacheRole
+
+  BastionNode:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: ami-dff017b8
+      InstanceType: t2.micro
+      SubnetId:
+        Ref: PublicSubnet1
+      AvailabilityZone: !Join [ "", [ !Ref "AWS::Region", !Ref AvailabilityZone1 ] ]
+      KeyName: MyEC2KeyPair
+      IamInstanceProfile: !Ref ElasticCacheInstanceProfile
+      SecurityGroupIds:
+        - Ref: BastionSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Join [ "", [ !Ref "AWS::StackName", "-bastion" ] ]
+    DependsOn:
+      - BastionSecurityGroup
+      - PublicSubnet1
+  
+  BastionSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security Group for Bastion node
+      SecurityGroupIngress:
+        - CidrIp: 0.0.0.0/0
+          FromPort: 22
+          IpProtocol: TCP
+          ToPort: 22
+      VpcId:
+        Ref: VPC
+    DependsOn: VPC
+
+  BastionElasticIp:
+    Type: AWS::EC2::EIP
+    Properties:
+      InstanceId:
+        Ref: BastionNode
+    DependsOn: BastionNode
+
+  BastionEIPAssociation:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      EIP:
+        Ref: BastionElasticIp
+      InstanceId:
+        Ref: BastionNode
+    DependsOn: BastionElasticIp
+
+  # Private subnet
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    DependsOn: VPC
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Join [ "", [ !Ref "AWS::Region", !Ref AvailabilityZone2 ] ]
+      CidrBlock: !Ref PrivateSubnetCidrBlock1
+      Tags:
+      - Key: Name
+        Value: !Join [ "", [ !Ref "AWS::StackName", "-private-az1" ] ]
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    DependsOn: VPC
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+      - Key: Name
+        Value: !Join [ "", [ !Ref "AWS::StackName", "-private" ] ]
+
+  PrivateSubnetRouteTableAssociation1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    DependsOn:
+    - PrivateSubnet1
+    - PrivateRouteTable
+    Properties:
+      SubnetId: !Ref PrivateSubnet1
+      RouteTableId: !Ref PrivateRouteTable
 
   # Private Network ACL
   PrivateNetworkAcl:
@@ -255,12 +370,12 @@ Resources:
         Value: !Join [ "", [ !Ref "AWS::StackName", "-private-acl" ] ]
 
   # Private Network ACL Rules
-  PrivateNetworkACLEntryForHTTP:
+  InboundPrivateNetworkACLEntryForHTTP:
     Type: AWS::EC2::NetworkAclEntry
     Properties:
       CidrBlock: 0.0.0.0/0
-      NetworkAclId:
-        Ref: PrivateNetworkACL
+      NetworkAclId: !Ref PrivateNetworkAcl
+      Egress: false
       Protocol: 6
       PortRange:
         From: 80
@@ -268,12 +383,12 @@ Resources:
       RuleAction: allow
       RuleNumber: 100
 
-  PrivateNetworkACLEntryForHTTPS:
+  InboundPrivateNetworkACLEntryForHTTPS:
     Type: AWS::EC2::NetworkAclEntry
     Properties:
       CidrBlock: 0.0.0.0/0
-      NetworkAclId:
-        Ref: PrivateNetworkACL
+      NetworkAclId: !Ref PrivateNetworkAcl
+      Egress: false
       Protocol: 6
       PortRange:
         From: 443
@@ -281,12 +396,12 @@ Resources:
       RuleAction: allow
       RuleNumber: 200
 
-  PrivateNetworkACLEntryForSSH:
+  InboundPrivateNetworkACLEntryForSSH:
     Type: AWS::EC2::NetworkAclEntry
     Properties:
       CidrBlock: 10.5.0.0/24
-      NetworkAclId:
-        Ref: PrivateNetworkACL
+      NetworkAclId: !Ref PrivateNetworkAcl
+      Egress: false
       Protocol: 6
       PortRange:
         From: 22
@@ -294,12 +409,12 @@ Resources:
       RuleAction: allow
       RuleNumber: 300
 
-  PrivateNetworkACLEntryForEphemeralConnections:
+  InboundPrivateNetworkACLEntryForEphemeralConnections:
     Type: AWS::EC2::NetworkAclEntry
     Properties:
       CidrBlock: 0.0.0.0/0
-      NetworkAclId:
-        Ref: PrivateNetworkACL
+      NetworkAclId: !Ref PrivateNetworkAcl
+      Egress: false
       Protocol: 6
       PortRange:
         From: 1024
@@ -307,12 +422,11 @@ Resources:
       RuleAction: allow
       RuleNumber: 400
 
-  PrivateNetworkACLEntryForHTTPOutbound:
+  OutboundPrivateNetworkACLEntryForHTTP:
     Type: AWS::EC2::NetworkAclEntry
     Properties:
       CidrBlock: 0.0.0.0/0
-      NetworkAclId:
-        Ref: PrivateNetworkACL
+      NetworkAclId: !Ref PrivateNetworkAcl
       Egress: true
       Protocol: 6
       PortRange:
@@ -321,12 +435,11 @@ Resources:
       RuleAction: allow
       RuleNumber: 100
 
-  PrivateNetworkACLEntryForHTTPSOutbound:
+  OutboundPrivateNetworkACLEntryForHTTPS:
     Type: AWS::EC2::NetworkAclEntry
     Properties:
       CidrBlock: 0.0.0.0/0
-      NetworkAclId:
-        Ref: PrivateNetworkACL
+      NetworkAclId: !Ref PrivateNetworkAcl
       Egress: true
       Protocol: 6
       PortRange:
@@ -335,12 +448,11 @@ Resources:
       RuleAction: allow
       RuleNumber: 200
 
-  PrivateNetworkACLEntryForSSHOutbound:
+  OutboundPrivateNetworkACLEntryForSSH:
     Type: AWS::EC2::NetworkAclEntry
     Properties:
       CidrBlock: 10.5.0.0/24
-      NetworkAclId:
-        Ref: PrivateNetworkACL
+      NetworkAclId: !Ref PrivateNetworkAcl
       Egress: true
       Protocol: 6
       PortRange:
@@ -349,12 +461,11 @@ Resources:
       RuleAction: allow
       RuleNumber: 300
   
-  PrivateNetworkACLEntryForEphemeralPortsOutbound:
+  OutboundPrivateNetworkACLEntryForEphemeralPorts:
     Type: AWS::EC2::NetworkAclEntry
     Properties:
       CidrBlock: 0.0.0.0/0
-      NetworkAclId:
-        Ref: PrivateNetworkACL
+      NetworkAclId: !Ref PrivateNetworkAcl
       Egress: true
       Protocol: 6
       PortRange:
@@ -374,39 +485,6 @@ Resources:
         !Ref PrivateSubnet1
       NetworkAclId:
         !Ref PrivateNetworkAcl
-
-  # Security Groups
-  InternalAccessSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    DependsOn: VPC
-    Properties:
-      GroupDescription: Instance to Instance Access in VPC
-      VpcId: !Ref VPC
-      Tags:
-      - Key: Name
-        Value: !Join [ "", [ !Ref "AWS::StackName", "-instance-to-instance" ] ]
-
-  InternalAccessSecurityGroupIngress:
-    Type: AWS::EC2::SecurityGroupIngress
-    DependsOn: InternalAccessSecurityGroup
-    Properties:
-      GroupId: !Ref InternalAccessSecurityGroup
-      IpProtocol: "-1"
-      SourceSecurityGroupId: !Ref InternalAccessSecurityGroup
-  RemoteAccessSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Instance Access over VPN/Direct Connect
-      VpcId: !Ref VPC
-      Tags:
-      - Key: Name
-        Value: !Join [ "", [ !Ref "AWS::StackName", "-remote-to-instance" ] ]
-      SecurityGroupIngress:
-      - IpProtocol: "-1"
-        CidrIp: !Ref RemoteCidrForSecurityGroup
-      SecurityGroupEgress:
-      - IpProtocol: "-1"
-        CidrIp: 0.0.0.0/0
   
   # Redis
   RedisParameterGroup:
